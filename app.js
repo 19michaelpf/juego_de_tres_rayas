@@ -1,6 +1,6 @@
 /**
- * TRES EN RAYA (TIC-TAC-TOE)
- * Lógica robusta del juego, IA Minimax, Efectos de Audio y Confeti
+ * TRES EN RAYA (TIC-TAC-TOE) CON SUPABASE Y RANKING
+ * Lógica robusta del juego, IA Minimax, Audio, Confeti, Persistencia de Apodos y Leaderboard
  */
 
 (() => {
@@ -30,6 +30,7 @@
   const scoreXEl = document.getElementById('scoreX');
   const scoreOEl = document.getElementById('scoreO');
   const scoreTieEl = document.getElementById('scoreTie');
+  const nameXEl = document.getElementById('nameX');
   const nameOEl = document.getElementById('nameO');
   const cardXEl = document.getElementById('cardX');
   const cardOEl = document.getElementById('cardO');
@@ -37,14 +38,48 @@
   const strikeLine = document.getElementById('strikeLine');
   const confettiCanvas = document.getElementById('confettiCanvas');
 
+  // Elementos de Supabase, Ranking y Modal
+  const playerXNameInput = document.getElementById('playerXNameInput');
+  const playerONameInput = document.getElementById('playerONameInput');
+  const supabaseBadge = document.getElementById('supabaseBadge');
+  const badgeText = document.getElementById('badgeText');
+  const rankingBtn = document.getElementById('rankingBtn');
+  const cloudModalBtn = document.getElementById('cloudModalBtn');
+  const cloudModal = document.getElementById('cloudModal');
+  const closeModalBtn = document.getElementById('closeModalBtn');
+  const modalTabs = document.querySelectorAll('.modal-tab');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+  const rankingCount = document.getElementById('rankingCount');
+  const refreshRankingBtn = document.getElementById('refreshRankingBtn');
+  const myNicknameDisplay = document.getElementById('myNicknameDisplay');
+  const rankingTableBody = document.getElementById('rankingTableBody');
+  const historyCount = document.getElementById('historyCount');
+  const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
+  const historyTableBody = document.getElementById('historyTableBody');
+  const statTotalMatches = document.getElementById('statTotalMatches');
+  const statXWins = document.getElementById('statXWins');
+  const statOWins = document.getElementById('statOWins');
+  const statTies = document.getElementById('statTies');
+  const statAvgDuration = document.getElementById('statAvgDuration');
+  const supabaseConfigForm = document.getElementById('supabaseConfigForm');
+  const cfgSupabaseUrl = document.getElementById('cfgSupabaseUrl');
+  const cfgSupabaseAnonKey = document.getElementById('cfgSupabaseAnonKey');
+  const testConnBtn = document.getElementById('testConnBtn');
+  const clearConnBtn = document.getElementById('clearConnBtn');
+  const configStatusMsg = document.getElementById('configStatusMsg');
+  const toastNotification = document.getElementById('toastNotification');
+
   // --- Estado de la Partida ---
   let board = Array(9).fill('');
   let currentPlayer = 'X';
   let isGameActive = true;
   let isAiThinking = false;
   let aiTimeoutId = null;
+  let matchStartTime = Date.now();
+  let currentMatchMoves = [];
   let isMuted = false;
   let scores = { X: 0, O: 0, tie: 0 };
+  let toastTimeout = null;
 
   // Cargar preferencias guardadas con manejo de errores
   try {
@@ -54,6 +89,17 @@
     if (savedMute !== null) isMuted = JSON.parse(savedMute);
   } catch (e) {
     console.warn('LocalStorage no disponible:', e);
+  }
+
+  // --- Sistema de Notificación Toast ---
+  function showToast(text, duration = 3200) {
+    if (!toastNotification) return;
+    toastNotification.textContent = text;
+    toastNotification.style.display = 'flex';
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+      toastNotification.style.display = 'none';
+    }, duration);
   }
 
   // --- Sistema de Audio Sintetizado (Web Audio API) ---
@@ -363,23 +409,38 @@
 
   // --- Lógica Principal del Juego ---
   function initGame() {
+    // 1. Cargar apodos guardados previamente en LocalStorage
+    try {
+      const savedNickX = localStorage.getItem('tictactoe_nickname_x');
+      if (savedNickX && playerXNameInput) {
+        playerXNameInput.value = savedNickX;
+      }
+      const savedNickO = localStorage.getItem('tictactoe_nickname_o');
+      if (savedNickO && playerONameInput) {
+        playerONameInput.value = savedNickO;
+      }
+    } catch (e) {
+      console.warn('Error leyendo apodos de LocalStorage:', e);
+    }
+
     updateScoresUI();
     updateAudioIcon();
+    syncPlayerNames();
+    updateSupabaseBadge();
     setupEventListeners();
     resetGame();
   }
 
   function resetGame() {
-    // 1. Cancelar cualquier timer pendiente de la IA y detener confeti
     clearAiTimeout();
     Confetti.stop();
     isAiThinking = false;
     isGameActive = true;
+    matchStartTime = Date.now();
+    currentMatchMoves = [];
 
-    // 2. Limpiar estado lógico del tablero
     board = Array(9).fill('');
 
-    // 3. Ocultar y reiniciar línea de victoria SVG usando setAttribute (seguro en SVG)
     if (strikeSvg) {
       strikeSvg.style.display = 'none';
       strikeSvg.setAttribute('class', 'strike-line-svg');
@@ -391,14 +452,12 @@
       strikeLine.setAttribute('y2', '0');
     }
 
-    // 4. Limpiar casillas en el DOM
     cells.forEach(cell => {
       cell.textContent = '';
       cell.setAttribute('class', 'cell');
       cell.removeAttribute('disabled');
     });
 
-    // 5. Determinar turno inicial
     const turnPreference = firstTurnSelect ? firstTurnSelect.value : 'X';
     if (turnPreference === 'random') {
       currentPlayer = Math.random() < 0.5 ? 'X' : 'O';
@@ -406,10 +465,8 @@
       currentPlayer = turnPreference || 'X';
     }
 
-    // 6. Actualizar mensaje de turno en interfaz
     updateTurnDisplay();
 
-    // 7. Si arranca la IA en modo pve
     if (gameModeSelect && gameModeSelect.value === 'pve' && currentPlayer === 'O') {
       triggerAiMove();
     }
@@ -419,13 +476,11 @@
     const cell = e.currentTarget;
     const index = parseInt(cell.dataset.index, 10);
 
-    // Validar si la celda se puede marcar
     if (board[index] !== '' || !isGameActive || isAiThinking) return;
 
     AudioEngine.init();
     makeMove(index, currentPlayer);
 
-    // Si la partida sigue activa y es turno de la IA
     if (isGameActive && gameModeSelect.value === 'pve' && currentPlayer === 'O') {
       triggerAiMove();
     }
@@ -440,6 +495,14 @@
       cell.textContent = player;
       cell.setAttribute('class', `cell taken ${player.toLowerCase()}`);
     }
+
+    // Registrar jugada para la tabla relacional match_moves
+    currentMatchMoves.push({
+      move_number: currentMatchMoves.length + 1,
+      player: player,
+      cell_index: index,
+      created_at: new Date().toISOString()
+    });
 
     AudioEngine.playMove(player);
 
@@ -487,10 +550,17 @@
     });
   }
 
-  function endGame(winner, winCombo = null) {
+  async function endGame(winner, winCombo = null) {
     isGameActive = false;
     clearAiTimeout();
     isAiThinking = false;
+
+    const durationSeconds = Math.max(1, Math.round((Date.now() - matchStartTime) / 1000));
+    const totalMoves = board.filter(c => c !== '').length;
+
+    const nameX = (playerXNameInput && playerXNameInput.value.trim()) || 'Jugador X';
+    const isPve = gameModeSelect && gameModeSelect.value === 'pve';
+    const nameO = (playerONameInput && playerONameInput.value.trim()) || (isPve ? 'IA (PC)' : 'Jugador O');
 
     try {
       if (winner === 'tie') {
@@ -506,8 +576,8 @@
         AudioEngine.playTie();
       } else {
         scores[winner] = (scores[winner] || 0) + 1;
-        const isVsAI = gameModeSelect && gameModeSelect.value === 'pve';
-        const winnerLabel = winner === 'X' ? '¡Victoria de X!' : (isVsAI ? '¡Victoria de la IA!' : '¡Victoria de O!');
+        const winnerName = winner === 'X' ? nameX : nameO;
+        const winnerLabel = `¡Victoria de ${winnerName}!`;
 
         if (statusMessageEl) {
           statusMessageEl.innerHTML = `
@@ -524,7 +594,7 @@
         }
 
         AudioEngine.playVictory();
-        if (!isVsAI || winner === 'X') {
+        if (!isPve || winner === 'X') {
           Confetti.launch();
         }
       }
@@ -534,6 +604,35 @@
 
     saveScores();
     updateScoresUI();
+
+    // Guardar partida en Supabase (si está configurado)
+    if (typeof SupabaseClient !== 'undefined') {
+      const matchData = {
+        gameMode: isPve ? 'pve' : 'pvp',
+        aiDifficulty: isPve ? (aiDifficultySelect ? aiDifficultySelect.value : 'hard') : null,
+        winner: winner,
+        playerXName: nameX,
+        playerOName: nameO,
+        totalMoves: totalMoves,
+        finalBoard: board.join(''),
+        boardState: [...board],
+        winningCombo: winCombo || null,
+        durationSeconds: durationSeconds
+      };
+
+      SupabaseClient.saveMatch(matchData, currentMatchMoves).then(res => {
+        if (res && res.ok) {
+          showToast('☁️ Partida y jugadas guardadas en Supabase');
+          // Si el modal está abierto en Ranking o Historial, actualizar automáticamente
+          if (cloudModal && cloudModal.style.display === 'flex') {
+            loadRanking();
+            loadHistory();
+          }
+        }
+      }).catch(err => {
+        console.warn('No se pudo guardar la partida en Supabase:', err);
+      });
+    }
   }
 
   function drawStrikeLine(combo, winner) {
@@ -566,7 +665,9 @@
     if (!statusMessageEl) return;
 
     const isPve = gameModeSelect && gameModeSelect.value === 'pve';
-    const playerLabel = currentPlayer === 'X' ? 'X' : (isPve ? 'IA (O)' : 'O');
+    const nameX = (playerXNameInput && playerXNameInput.value.trim()) || 'X';
+    const nameO = (playerONameInput && playerONameInput.value.trim()) || (isPve ? 'IA (O)' : 'O');
+    const playerLabel = currentPlayer === 'X' ? nameX : nameO;
     const colorClass = currentPlayer === 'X' ? 'x-color' : 'o-color';
 
     statusMessageEl.innerHTML = `Turno de <span class="highlight-player ${colorClass}">${playerLabel}</span>`;
@@ -617,16 +718,245 @@
     }
   }
 
+  function syncPlayerNames() {
+    const isPve = gameModeSelect && gameModeSelect.value === 'pve';
+
+    if (playerXNameInput && nameXEl) {
+      const nickX = playerXNameInput.value.trim() || 'Jugador X';
+      nameXEl.textContent = nickX;
+      try {
+        localStorage.setItem('tictactoe_nickname_x', nickX);
+      } catch (e) {}
+      if (myNicknameDisplay) {
+        myNicknameDisplay.textContent = nickX;
+      }
+    }
+
+    if (playerONameInput && nameOEl) {
+      if (isPve && (!playerONameInput.value || playerONameInput.value === 'Jugador O')) {
+        playerONameInput.value = 'IA (PC)';
+      } else if (!isPve && playerONameInput.value === 'IA (PC)') {
+        playerONameInput.value = 'Jugador O';
+      }
+      const nickO = playerONameInput.value.trim() || (isPve ? 'IA (PC)' : 'Jugador O');
+      nameOEl.textContent = nickO;
+      try {
+        if (!isPve) {
+          localStorage.setItem('tictactoe_nickname_o', nickO);
+        }
+      } catch (e) {}
+    }
+  }
+
   function handleModeChange() {
     const isPve = gameModeSelect && gameModeSelect.value === 'pve';
     if (difficultyGroup) {
       difficultyGroup.style.display = isPve ? 'flex' : 'none';
     }
-    if (nameOEl) {
-      nameOEl.textContent = isPve ? 'IA (PC)' : 'Jugador O';
-    }
+    syncPlayerNames();
     AudioEngine.playClick();
     resetGame();
+  }
+
+  // --- Integración con Supabase, Ranking y Modal ---
+  function updateSupabaseBadge() {
+    if (!supabaseBadge || !badgeText) return;
+
+    if (typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG.isConfigured()) {
+      supabaseBadge.className = 'supabase-badge connected';
+      badgeText.textContent = 'Supabase Conectado';
+      supabaseBadge.title = 'Conectado a la base de datos en Supabase. Clic para ver ranking e historial.';
+    } else {
+      supabaseBadge.className = 'supabase-badge local';
+      badgeText.textContent = 'Modo Local';
+      supabaseBadge.title = 'Supabase no configurado. Clic para configurar credenciales.';
+    }
+  }
+
+  function openCloudModal(tabName = 'rankingTab') {
+    if (!cloudModal) return;
+    cloudModal.style.display = 'flex';
+    switchTab(tabName);
+  }
+
+  function closeCloudModal() {
+    if (!cloudModal) return;
+    cloudModal.style.display = 'none';
+  }
+
+  function switchTab(targetTabId) {
+    modalTabs.forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.tab === targetTabId);
+    });
+    tabPanes.forEach(pane => {
+      pane.classList.toggle('active', pane.id === targetTabId);
+    });
+
+    if (targetTabId === 'rankingTab') {
+      loadRanking();
+    } else if (targetTabId === 'historyTab') {
+      loadHistory();
+    } else if (targetTabId === 'statsTab') {
+      loadStats();
+    } else if (targetTabId === 'configTab') {
+      loadConfigTab();
+    }
+  }
+
+  // Cargar tabla de Ranking / Leaderboard
+  async function loadRanking() {
+    if (!rankingTableBody) return;
+    if (rankingCount) rankingCount.textContent = 'Cargando clasificación...';
+    rankingTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Consultando ranking en Supabase...</td></tr>`;
+
+    if (myNicknameDisplay && playerXNameInput) {
+      myNicknameDisplay.textContent = playerXNameInput.value.trim() || 'Jugador X';
+    }
+
+    if (!SUPABASE_CONFIG.isConfigured()) {
+      if (rankingCount) rankingCount.textContent = 'Sin conexión a Supabase';
+      rankingTableBody.innerHTML = `
+        <tr>
+          <td colspan="7" class="empty-state">
+            ⚠️ Supabase no está configurado.<br>
+            Ve a la pestaña <strong>Configuración</strong> para conectar tu base de datos y activar el ranking global.
+          </td>
+        </tr>`;
+      return;
+    }
+
+    const myNick = (playerXNameInput ? playerXNameInput.value.trim() : 'Jugador X').toLowerCase();
+    const res = await SupabaseClient.getLeaderboard(25);
+
+    if (!res.ok || !res.data || res.data.length === 0) {
+      if (rankingCount) rankingCount.textContent = '0 jugadores en el ranking';
+      rankingTableBody.innerHTML = `
+        <tr>
+          <td colspan="7" class="empty-state">
+            ${res.message ? `Error: ${res.message}` : 'Aún no hay jugadores registrados en el ranking. ¡Juega una partida para ser el primero!'}
+          </td>
+        </tr>`;
+      return;
+    }
+
+    if (rankingCount) rankingCount.textContent = `Top ${res.data.length} Jugadores`;
+
+    rankingTableBody.innerHTML = res.data.map((player, idx) => {
+      let medal = `<span class="rank-number">#${idx + 1}</span>`;
+      if (idx === 0) medal = `<span class="rank-badge" title="Primer Lugar">🥇</span>`;
+      else if (idx === 1) medal = `<span class="rank-badge" title="Segundo Lugar">🥈</span>`;
+      else if (idx === 2) medal = `<span class="rank-badge" title="Tercer Lugar">🥉</span>`;
+
+      const playerNick = player.nickname || player.player_name || 'Anónimo';
+      const isMe = playerNick.toLowerCase() === myNick;
+      const rowClass = isMe ? 'current-user-row' : '';
+      const meBadge = isMe ? ' <small style="color:#3ecf8e;font-size:0.75rem;font-weight:700;">(Tú)</small>' : '';
+      const gamesPlayed = player.games_played !== undefined ? player.games_played : (player.matches_played || 0);
+      const winRate = gamesPlayed > 0 
+        ? Math.round((player.wins / gamesPlayed) * 100) + '%' 
+        : '0%';
+
+      return `
+        <tr class="${rowClass}">
+          <td style="text-align: center;">${medal}</td>
+          <td><strong>${escapeHtml(playerNick)}</strong>${meBadge}</td>
+          <td style="text-align: center; color: var(--color-x); font-weight: 700;">${player.wins || 0}</td>
+          <td style="text-align: center; color: var(--color-o);">${player.losses || 0}</td>
+          <td style="text-align: center; color: var(--color-tie);">${player.ties || 0}</td>
+          <td style="text-align: center;">${gamesPlayed}</td>
+          <td style="text-align: center; font-weight: 700;">${winRate}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Cargar tabla de Historial
+  async function loadHistory() {
+    if (!historyTableBody) return;
+    if (historyCount) historyCount.textContent = 'Cargando partidas...';
+    historyTableBody.innerHTML = `<tr><td colspan="5" class="empty-state">Conectando con Supabase...</td></tr>`;
+
+    if (!SUPABASE_CONFIG.isConfigured()) {
+      if (historyCount) historyCount.textContent = 'Sin conexión a Supabase';
+      historyTableBody.innerHTML = `
+        <tr>
+          <td colspan="5" class="empty-state">
+            ⚠️ Supabase no está configurado.<br>
+            Ve a la pestaña <strong>Configuración</strong> para añadir tu URL y Anon Key.
+          </td>
+        </tr>`;
+      return;
+    }
+
+    const res = await SupabaseClient.getRecentMatches(15);
+    if (!res.ok || !res.data || res.data.length === 0) {
+      if (historyCount) historyCount.textContent = '0 partidas registradas';
+      historyTableBody.innerHTML = `
+        <tr>
+          <td colspan="5" class="empty-state">
+            ${res.message ? `Error: ${res.message}` : 'No hay partidas registradas en la nube aún. ¡Juega una partida para registrarla!'}
+          </td>
+        </tr>`;
+      return;
+    }
+
+    if (historyCount) historyCount.textContent = `Mostrando ${res.data.length} partidas recientes`;
+
+    historyTableBody.innerHTML = res.data.map(m => {
+      const date = new Date(m.created_at).toLocaleDateString('es-ES', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      const modeLabel = m.game_mode === 'pve' ? `IA (${m.ai_difficulty || 'PC'})` : '2 Jugadores';
+      const winBadge = m.winner === 'tie'
+        ? `<span class="win-badge-table tie">Empate</span>`
+        : `<span class="win-badge-table ${m.winner.toLowerCase()}">Gana ${m.winner}</span>`;
+
+      return `
+        <tr>
+          <td>${date}</td>
+          <td>${modeLabel}</td>
+          <td>${winBadge}</td>
+          <td>${escapeHtml(m.player_x_name || 'X')} vs ${escapeHtml(m.player_o_name || 'O')}</td>
+          <td>${m.duration_seconds || 0}s</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Cargar estadísticas globales
+  async function loadStats() {
+    if (!statTotalMatches) return;
+
+    if (!SUPABASE_CONFIG.isConfigured()) {
+      statTotalMatches.textContent = scores.X + scores.O + scores.tie;
+      if (statXWins) statXWins.textContent = scores.X;
+      if (statOWins) statOWins.textContent = scores.O;
+      if (statTies) statTies.textContent = scores.tie;
+      if (statAvgDuration) statAvgDuration.textContent = 'Local';
+      return;
+    }
+
+    const stats = await SupabaseClient.getGlobalStats();
+    if (!stats) return;
+
+    statTotalMatches.textContent = stats.total;
+    if (statXWins) statXWins.textContent = stats.xWins;
+    if (statOWins) statOWins.textContent = stats.oWins;
+    if (statTies) statTies.textContent = stats.ties;
+    if (statAvgDuration) statAvgDuration.textContent = stats.avgDuration;
+  }
+
+  function loadConfigTab() {
+    const creds = SUPABASE_CONFIG.getCredentials();
+    if (cfgSupabaseUrl) cfgSupabaseUrl.value = creds.url;
+    if (cfgSupabaseAnonKey) cfgSupabaseAnonKey.value = creds.anonKey;
+    if (configStatusMsg) configStatusMsg.style.display = 'none';
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[m]));
   }
 
   // --- Listeners de Eventos y Delegación ---
@@ -700,6 +1030,141 @@
       firstTurnSelect.addEventListener('change', () => {
         AudioEngine.playClick();
         resetGame();
+      });
+    }
+
+    // 8. Nombres / Apodos de jugadores con persistencia en LocalStorage
+    if (playerXNameInput) {
+      playerXNameInput.addEventListener('input', () => {
+        syncPlayerNames();
+        updateTurnDisplay();
+      });
+      playerXNameInput.addEventListener('change', () => {
+        syncPlayerNames();
+        showToast(`💾 Apodo guardado: ${playerXNameInput.value.trim() || 'Jugador X'}`);
+      });
+    }
+    if (playerONameInput) {
+      playerONameInput.addEventListener('input', () => {
+        syncPlayerNames();
+        updateTurnDisplay();
+      });
+    }
+
+    // 9. Botón directo de Ranking (🏆) y Nube (☁️)
+    if (rankingBtn) {
+      rankingBtn.addEventListener('click', () => openCloudModal('rankingTab'));
+    }
+    if (cloudModalBtn) {
+      cloudModalBtn.addEventListener('click', () => openCloudModal('historyTab'));
+    }
+    if (supabaseBadge) {
+      supabaseBadge.addEventListener('click', () => {
+        openCloudModal(SUPABASE_CONFIG.isConfigured() ? 'rankingTab' : 'configTab');
+      });
+    }
+    if (closeModalBtn) {
+      closeModalBtn.addEventListener('click', closeCloudModal);
+    }
+    if (cloudModal) {
+      cloudModal.addEventListener('click', (e) => {
+        if (e.target === cloudModal) closeCloudModal();
+      });
+    }
+
+    // Pestañas del modal
+    modalTabs.forEach(tab => {
+      tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+
+    if (refreshRankingBtn) {
+      refreshRankingBtn.addEventListener('click', loadRanking);
+    }
+
+    if (refreshHistoryBtn) {
+      refreshHistoryBtn.addEventListener('click', loadHistory);
+    }
+
+    // Formulario de configuración de Supabase
+    if (supabaseConfigForm) {
+      supabaseConfigForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const url = (cfgSupabaseUrl && cfgSupabaseUrl.value.trim()) || '';
+        const key = (cfgSupabaseAnonKey && cfgSupabaseAnonKey.value.trim()) || '';
+
+        SUPABASE_CONFIG.saveCredentials(url, key);
+        updateSupabaseBadge();
+
+        if (configStatusMsg) {
+          configStatusMsg.textContent = 'Verificando conexión con Supabase...';
+          configStatusMsg.className = 'config-status-msg';
+          configStatusMsg.style.display = 'block';
+        }
+
+        const res = await SupabaseClient.testConnection();
+        if (res.ok) {
+          if (configStatusMsg) {
+            configStatusMsg.textContent = '✅ ¡Credenciales guardadas y conexión exitosa!';
+            configStatusMsg.className = 'config-status-msg success';
+          }
+          showToast('🟢 Supabase conectado con éxito');
+        } else {
+          if (configStatusMsg) {
+            configStatusMsg.textContent = `⚠️ Guardado, pero prueba falló: ${res.message}`;
+            configStatusMsg.className = 'config-status-msg error';
+          }
+        }
+      });
+    }
+
+    if (testConnBtn) {
+      testConnBtn.addEventListener('click', async () => {
+        const url = (cfgSupabaseUrl && cfgSupabaseUrl.value.trim()) || '';
+        const key = (cfgSupabaseAnonKey && cfgSupabaseAnonKey.value.trim()) || '';
+
+        if (!url || !key) {
+          if (configStatusMsg) {
+            configStatusMsg.textContent = 'Introduce la URL y Anon Key para probar.';
+            configStatusMsg.className = 'config-status-msg error';
+          }
+          return;
+        }
+
+        SUPABASE_CONFIG.saveCredentials(url, key);
+        if (configStatusMsg) {
+          configStatusMsg.textContent = 'Probando conexión...';
+          configStatusMsg.className = 'config-status-msg';
+          configStatusMsg.style.display = 'block';
+        }
+
+        const res = await SupabaseClient.testConnection();
+        if (res.ok) {
+          if (configStatusMsg) {
+            configStatusMsg.textContent = '✅ ¡Conexión con Supabase verificada correctamente!';
+            configStatusMsg.className = 'config-status-msg success';
+          }
+          updateSupabaseBadge();
+          showToast('🟢 Conexión verificada');
+        } else {
+          if (configStatusMsg) {
+            configStatusMsg.textContent = `❌ Error de conexión: ${res.message}`;
+            configStatusMsg.className = 'config-status-msg error';
+          }
+        }
+      });
+    }
+
+    if (clearConnBtn) {
+      clearConnBtn.addEventListener('click', () => {
+        SUPABASE_CONFIG.clearCredentials();
+        loadConfigTab();
+        updateSupabaseBadge();
+        if (configStatusMsg) {
+          configStatusMsg.textContent = 'Credenciales eliminadas. El juego vuelve a Modo Local.';
+          configStatusMsg.className = 'config-status-msg';
+          configStatusMsg.style.display = 'block';
+        }
+        showToast('⚪ Desconectado de Supabase');
       });
     }
   }

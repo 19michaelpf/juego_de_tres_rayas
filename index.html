@@ -3,15 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tres en Raya | Tic-Tac-Toe</title>
+  <title>Tres en Raya | Tic-Tac-Toe con Supabase y Ranking</title>
   <link rel="stylesheet" href="style.css">
+  <!-- Supabase JS Client via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="app-container">
     <!-- Header -->
     <header class="game-header">
-      <h1 class="game-title">TRES EN RAYA</h1>
+      <div class="header-left">
+        <h1 class="game-title">TRES EN RAYA</h1>
+        <!-- Insignia de estado de conexión de Supabase -->
+        <button id="supabaseBadge" class="supabase-badge local" title="Ver estado de conexión con Supabase">
+          <span class="badge-dot"></span>
+          <span id="badgeText">Modo Local</span>
+        </button>
+      </div>
+
       <div class="header-controls">
+        <button id="rankingBtn" class="icon-btn ranking-btn-highlight" title="Ver Ranking / Clasificación" aria-label="Abrir Ranking">
+          🏆
+        </button>
+        <button id="cloudModalBtn" class="icon-btn" title="Historial y Configuración en la Nube (Supabase)" aria-label="Abrir Supabase">
+          ☁️
+        </button>
         <button id="soundToggleBtn" class="icon-btn" title="Alternar Sonido (🔊/🔇)" aria-label="Alternar Sonido">
           <span id="soundIcon">🔊</span>
         </button>
@@ -23,6 +39,25 @@
         </button>
       </div>
     </header>
+
+    <!-- Nombres / Apodos de Jugadores (Guardado automático en LocalStorage y Supabase) -->
+    <section class="players-names-panel">
+      <div class="player-input-wrap">
+        <span class="badge-symbol x-sym">X</span>
+        <div class="input-col">
+          <label for="playerXNameInput" class="input-sublabel">Tu Apodo (X)</label>
+          <input type="text" id="playerXNameInput" placeholder="Tu Apodo" value="Jugador X" maxlength="15" class="name-input" title="Tu Apodo (se guarda automáticamente para el ranking)">
+        </div>
+      </div>
+      <span class="vs-text">VS</span>
+      <div class="player-input-wrap">
+        <span class="badge-symbol o-sym">O</span>
+        <div class="input-col">
+          <label for="playerONameInput" class="input-sublabel">Rival (O)</label>
+          <input type="text" id="playerONameInput" placeholder="Rival" value="IA (PC)" maxlength="15" class="name-input" title="Apodo del Rival">
+        </div>
+      </div>
+    </section>
 
     <!-- Controls & Game Mode Settings -->
     <section class="controls-panel">
@@ -117,9 +152,142 @@
     </footer>
   </div>
 
+  <!-- Modal de Supabase (Ranking, Historial, Estadísticas, Configuración) -->
+  <div id="cloudModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title">🏆 Ranking & Supabase Cloud</h2>
+        <button id="closeModalBtn" class="modal-close-btn" aria-label="Cerrar modal">&times;</button>
+      </div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="rankingTab">🏆 Ranking</button>
+        <button class="modal-tab" data-tab="historyTab">📜 Historial</button>
+        <button class="modal-tab" data-tab="statsTab">📊 Globales</button>
+        <button class="modal-tab" data-tab="configTab">⚙️ Configuración</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Tab 0: Ranking / Leaderboard -->
+        <div id="rankingTab" class="tab-pane active">
+          <div class="tab-actions">
+            <span class="history-count" id="rankingCount">Top Jugadores</span>
+            <button id="refreshRankingBtn" class="refresh-btn">🔄 Actualizar</button>
+          </div>
+          <div class="ranking-user-summary">
+            <span>Tu apodo registrado: <strong id="myNicknameDisplay">Jugador X</strong></span>
+          </div>
+          <div class="table-container">
+            <table class="history-table ranking-table">
+              <thead>
+                <tr>
+                  <th style="width: 45px; text-align: center;">#</th>
+                  <th>Jugador / Apodo</th>
+                  <th title="Victorias" style="text-align: center;">V</th>
+                  <th title="Derrotas" style="text-align: center;">D</th>
+                  <th title="Empates" style="text-align: center;">E</th>
+                  <th title="Partidas Totales" style="text-align: center;">PJ</th>
+                  <th title="Porcentaje de Victorias" style="text-align: center;">% Vict.</th>
+                </tr>
+              </thead>
+              <tbody id="rankingTableBody">
+                <tr><td colspan="7" class="empty-state">Cargando ranking...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 1: Historial de partidas -->
+        <div id="historyTab" class="tab-pane">
+          <div class="tab-actions">
+            <span class="history-count" id="historyCount">Cargando partidas...</span>
+            <button id="refreshHistoryBtn" class="refresh-btn">🔄 Actualizar</button>
+          </div>
+          <div class="table-container">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Modo</th>
+                  <th>Ganador</th>
+                  <th>Jugadores</th>
+                  <th>Tiempo</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody">
+                <tr><td colspan="5" class="empty-state">No hay partidas registradas aún.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 2: Estadísticas globales -->
+        <div id="statsTab" class="tab-pane">
+          <div class="stats-grid">
+            <div class="stat-box">
+              <div class="stat-num" id="statTotalMatches">0</div>
+              <div class="stat-lbl">Partidas Totales</div>
+            </div>
+            <div class="stat-box stat-x">
+              <div class="stat-num" id="statXWins">0</div>
+              <div class="stat-lbl">Victorias X</div>
+            </div>
+            <div class="stat-box stat-o">
+              <div class="stat-num" id="statOWins">0</div>
+              <div class="stat-lbl">Victorias O / IA</div>
+            </div>
+            <div class="stat-box stat-tie">
+              <div class="stat-num" id="statTies">0</div>
+              <div class="stat-lbl">Empates</div>
+            </div>
+          </div>
+          <div class="stat-duration-wrap">
+            ⏱️ Tiempo promedio por partida: <strong id="statAvgDuration">0</strong> s
+          </div>
+        </div>
+
+        <!-- Tab 3: Configuración de credenciales de Supabase -->
+        <div id="configTab" class="tab-pane">
+          <form id="supabaseConfigForm" class="config-form">
+            <div class="form-group">
+              <label for="cfgSupabaseUrl">Project URL (Supabase):</label>
+              <input type="url" id="cfgSupabaseUrl" placeholder="https://tu-proyecto.supabase.co" class="form-input">
+              <span class="form-hint">Supabase Dashboard &gt; Project Settings &gt; API &gt; Project URL</span>
+            </div>
+
+            <div class="form-group">
+              <label for="cfgSupabaseAnonKey">Anon Public Key:</label>
+              <input type="password" id="cfgSupabaseAnonKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI..." class="form-input">
+              <span class="form-hint">Supabase Dashboard &gt; Project Settings &gt; API &gt; anon public key</span>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="action-btn primary-btn">💾 Guardar Credenciales</button>
+              <button type="button" id="testConnBtn" class="action-btn secondary-btn">🔌 Probar Conexión</button>
+              <button type="button" id="clearConnBtn" class="action-btn text-btn">Desconectar</button>
+            </div>
+
+            <div id="configStatusMsg" class="config-status-msg"></div>
+
+            <div class="sql-instructions">
+              <h4>¿Cómo crear las tablas en Supabase?</h4>
+              <p>Abre el archivo <code>supabase_schema.sql</code> de este proyecto, copia su contenido y ejecútalo en el <strong>SQL Editor</strong> de Supabase.</p>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast flotante de notificación -->
+  <div id="toastNotification" class="toast-popup" style="display: none;"></div>
+
   <!-- Confetti Canvas for Victory Celebrations -->
   <canvas id="confettiCanvas"></canvas>
 
+  <!-- Scripts -->
+  <script src="supabase-config.js"></script>
+  <script src="supabase-client.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
