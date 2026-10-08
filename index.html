@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tres en Raya | Tic-Tac-Toe</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="game-header">
+      <h1 class="game-title">TRES EN RAYA</h1>
+      <div class="header-controls">
+        <button id="soundToggleBtn" class="icon-btn" title="Alternar Sonido (🔊/🔇)" aria-label="Alternar Sonido">
+          <span id="soundIcon">🔊</span>
+        </button>
+        <button id="quickRestartBtn" class="icon-btn" title="Reiniciar Partida" aria-label="Reiniciar Partida">
+          🔄
+        </button>
+        <button id="resetScoresBtn" class="icon-btn" title="Reiniciar Marcador a 0" aria-label="Reiniciar Marcador">
+          📊
+        </button>
+      </div>
+    </header>
+
+    <!-- Controls & Game Mode Settings -->
+    <section class="controls-panel">
+      <div class="control-group">
+        <label for="gameMode">Modo de Juego:</label>
+        <select id="gameMode" class="styled-select">
+          <option value="pvp">2 Jugadores (Local)</option>
+          <option value="pve" selected>Contra la IA (PC)</option>
+        </select>
+      </div>
+
+      <div class="control-group" id="difficultyGroup">
+        <label for="aiDifficulty">Dificultad IA:</label>
+        <select id="aiDifficulty" class="styled-select">
+          <option value="easy">Fácil</option>
+          <option value="medium">Media</option>
+          <option value="hard" selected>Imposible (Minimax)</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="firstTurn">Primer Turno:</label>
+        <select id="firstTurn" class="styled-select">
+          <option value="X" selected>Jugador X</option>
+          <option value="O">Jugador O</option>
+          <option value="random">Aleatorio</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Scoreboard -->
+    <section class="scoreboard">
+      <div class="score-card score-x" id="cardX">
+        <div class="player-tag">
+          <span class="symbol-badge x-badge">X</span>
+          <span class="player-name" id="nameX">Jugador X</span>
+        </div>
+        <div class="score-value" id="scoreX">0</div>
+      </div>
+
+      <div class="score-card score-tie" id="cardTie">
+        <div class="player-tag">
+          <span class="symbol-badge tie-badge">🤝</span>
+          <span class="player-name">Empates</span>
+        </div>
+        <div class="score-value" id="scoreTie">0</div>
+      </div>
+
+      <div class="score-card score-o" id="cardO">
+        <div class="player-tag">
+          <span class="symbol-badge o-badge">O</span>
+          <span class="player-name" id="nameO">IA (PC)</span>
+        </div>
+        <div class="score-value" id="scoreO">0</div>
+      </div>
+    </section>
+
+    <!-- Status Banner / Messages -->
+    <section class="status-panel">
+      <div id="statusMessage" class="status-text">
+        Turno de <span class="highlight-player x-color">X</span>
+      </div>
+    </section>
+
+    <!-- Board Container -->
+    <main class="board-wrapper">
+      <div class="board" id="board" role="grid" aria-label="Tablero de Tres en Raya">
+        <button class="cell" data-index="0" aria-label="Casilla 1"></button>
+        <button class="cell" data-index="1" aria-label="Casilla 2"></button>
+        <button class="cell" data-index="2" aria-label="Casilla 3"></button>
+        <button class="cell" data-index="3" aria-label="Casilla 4"></button>
+        <button class="cell" data-index="4" aria-label="Casilla 5"></button>
+        <button class="cell" data-index="5" aria-label="Casilla 6"></button>
+        <button class="cell" data-index="6" aria-label="Casilla 7"></button>
+        <button class="cell" data-index="7" aria-label="Casilla 8"></button>
+        <button class="cell" data-index="8" aria-label="Casilla 9"></button>
+      </div>
+      <!-- SVG Strike Line for winning line animation -->
+      <svg class="strike-line-svg" id="strikeSvg">
+        <line id="strikeLine" x1="0" y1="0" x2="0" y2="0" />
+      </svg>
+    </main>
+
+    <!-- Bottom Actions -->
+    <footer class="game-footer">
+      <button id="restartBtn" class="action-btn primary-btn" title="Iniciar o reiniciar una partida">
+        ▶ Iniciar / Reiniciar Juego
+      </button>
+      <button id="resetScoresBtnFooter" class="action-btn secondary-btn" title="Reiniciar marcador a cero">
+        📊 Reiniciar Marcador
+      </button>
+    </footer>
+  </div>
+
+  <!-- Confetti Canvas for Victory Celebrations -->
+  <canvas id="confettiCanvas"></canvas>
+
+  <script src="app.js"></script>
+</body>
+</html>
